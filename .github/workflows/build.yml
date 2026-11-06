@@ -1,0 +1,61 @@
+name: Build DuckStore.ipa
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-ipa
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate the Xcode project
+        run: xcodegen generate
+
+      - name: Build (no code signing)
+        run: |
+          xcodebuild \
+            -project DuckStore.xcodeproj \
+            -scheme DuckStore \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package the .ipa
+        run: |
+          APP=build/Build/Products/Release-iphoneos/DuckStore.app
+          test -d "$APP" || { echo "Build did not produce DuckStore.app"; exit 1; }
+          rm -rf Payload DuckStore.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry DuckStore.ipa Payload
+          ls -lh DuckStore.ipa
+
+      - name: Keep a copy on the run page (90 days)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DuckStore-unsigned-ipa
+          path: DuckStore.ipa
+
+      - name: Publish to a Release (permanent link)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: DuckStore build ${{ github.run_number }}
+          body: Unsigned DuckStore.ipa. Sign it with your own certificate before installing.
+          files: DuckStore.ipa
